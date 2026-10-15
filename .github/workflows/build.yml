@@ -35,27 +35,27 @@ jobs:
       - name: Upload GUI .NET 7
         uses: actions/upload-artifact@v4
         with:
-          name: studio-gui-net7-\${{ github.sha }}
+          name: studio-gui-net7-${{ github.sha }}
           path: AssetStudio.GUI/bin/Release/net7.0-windows/publish
           if-no-files-found: error
 
       - name: Upload GUI .NET 8
         uses: actions/upload-artifact@v4
         with:
-          name: studio-gui-net8-\${{ github.sha }}
+          name: studio-gui-net8-${{ github.sha }}
           path: AssetStudio.GUI/bin/Release/net8.0-windows/publish
           if-no-files-found: error
 
       - name: Upload CLI .NET 7
         uses: actions/upload-artifact@v4
         with:
-          name: studio-cli-net7-\${{ github.sha }}
+          name: studio-cli-net7-${{ github.sha }}
           path: AssetStudio.CLI/bin/Release/net7.0-windows/publish
           if-no-files-found: error
 
       - name: Upload CLI .NET 8
         uses: actions/upload-artifact@v4
         with:
-          name: studio-cli-net8-\${{ github.sha }}
+          name: studio-cli-net8-${{ github.sha }}
           path: AssetStudio.CLI/bin/Release/net8.0-windows/publish
           if-no-files-found: error
