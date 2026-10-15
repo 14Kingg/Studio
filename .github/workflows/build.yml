@@ -20,6 +20,9 @@ jobs:
       - name: NuGet Restore
         run: nuget restore AssetStudio.sln
 
+      - name: Run core regression tests
+        run: dotnet test AssetStudio.Tests/AssetStudio.Tests.csproj --configuration Release
+
       - name: Build GUI .NET 7
         run: msbuild AssetStudio.sln /t:AssetStudio_GUI:publish /p:Configuration=Release /p:TargetFramework=net7.0-windows /p:SelfContained=false /verbosity:minimal
 
