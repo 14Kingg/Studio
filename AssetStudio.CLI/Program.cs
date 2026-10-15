@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using AssetStudio;
 using AssetStudio.CLI.Properties;
 using Newtonsoft.Json;
 using static AssetStudio.CLI.Studio;
