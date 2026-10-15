@@ -252,6 +252,7 @@ namespace AssetStudio
                         S2PathCount = strings.Count(x => x.StartsWith("s2/", StringComparison.OrdinalIgnoreCase)),
                         TrailingBinarySize = bundleFile.FairGuardManifestTrailingBinarySize,
                         BinaryIndexDecoded = false,
+                        FirstBlockSkipped = bundleFile.FairGuardFirstBlockSkipped,
                         Strings = strings,
                         S2Paths = strings.Where(x => x.StartsWith("s2/", StringComparison.OrdinalIgnoreCase)).ToArray()
                     });
