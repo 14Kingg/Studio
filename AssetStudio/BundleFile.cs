@@ -658,7 +658,7 @@ namespace AssetStudio
                                     {
                                         FairGuardFirstBlockSkipped = true;
                                         Logger.Warning($"FairGuard-like bundle detected, but first-block recovery failed. Keeping a {uncompressedSize}-byte placeholder so later blocks and manifest strings can still be inspected.");
-                                        blocksStream.Write(new byte[uncompressedSize]);
+                                        blocksStream.Write(new byte[(int)uncompressedSize]);
                                         break;
                                     }
                                     throw new IOException($"Lz4 decompression error, write {numWrite} bytes but expected {uncompressedSize} bytes");
