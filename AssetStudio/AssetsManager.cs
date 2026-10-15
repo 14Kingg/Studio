@@ -19,6 +19,7 @@ namespace AssetStudio
         public string SpecifyUnityVersion;
         public CancellationTokenSource tokenSource = new CancellationTokenSource();
         public List<SerializedFile> assetsFileList = new List<SerializedFile>();
+        public List<FairGuardManifestExport> FairGuardManifestReports { get; } = new List<FairGuardManifestExport>();
 
         internal Dictionary<string, int> assetsFileIndexCache = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         internal Dictionary<string, BinaryReader> resourceFileReaders = new Dictionary<string, BinaryReader>(StringComparer.OrdinalIgnoreCase);
@@ -241,6 +242,21 @@ namespace AssetStudio
             try
             {
                 var bundleFile = new BundleFile(reader, Game);
+                if (bundleFile.FairGuardManifestStrings.Count > 0)
+                {
+                    var strings = bundleFile.FairGuardManifestStrings;
+                    FairGuardManifestReports.Add(new FairGuardManifestExport
+                    {
+                        SourcePath = bundleFile.SourcePath,
+                        ParsedStringCount = strings.Count,
+                        S2PathCount = strings.Count(x => x.StartsWith("s2/", StringComparison.OrdinalIgnoreCase)),
+                        TrailingBinarySize = bundleFile.FairGuardManifestTrailingBinarySize,
+                        BinaryIndexDecoded = false,
+                        FirstBlockSkipped = bundleFile.FairGuardFirstBlockSkipped,
+                        Strings = strings,
+                        S2Paths = strings.Where(x => x.StartsWith("s2/", StringComparison.OrdinalIgnoreCase)).ToArray()
+                    });
+                }
                 foreach (var file in bundleFile.fileList)
                 {
                     var dummyPath = Path.Combine(Path.GetDirectoryName(reader.FullPath), file.fileName);

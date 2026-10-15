@@ -115,10 +115,19 @@ namespace AssetStudio
         
         private bool HasUncompressedDataHash = true;
         private bool HasBlockInfoNeedPaddingAtStart = true;
+        private byte[] m_UncompressedDataHash;
+
+        public bool IsFairGuardCandidate { get; private set; }
+        public bool FairGuardRecovered { get; private set; }
+        public bool FairGuardFirstBlockSkipped { get; private set; }
+        public IReadOnlyList<string> FairGuardManifestStrings { get; private set; } = Array.Empty<string>();
+        public int FairGuardManifestTrailingBinarySize { get; private set; }
+        public string SourcePath { get; private set; }
 
         public BundleFile(FileReader reader, Game game)
         {
             Game = game;
+            SourcePath = reader.FullPath;
             m_Header = ReadBundleHeader(reader);
             switch (m_Header.signature)
             {
@@ -148,6 +157,7 @@ namespace AssetStudio
                     using (var blocksStream = CreateBlocksStream(reader.FullPath))
                     {
                         ReadBlocks(reader, blocksStream);
+                        TryParseFairGuardManifest(blocksStream);
                         ReadFiles(blocksStream, reader.FullPath);
                     }
                     break;
@@ -487,7 +497,7 @@ namespace AssetStudio
             {
                 if (HasUncompressedDataHash)
                 {
-                    var uncompressedDataHash = blocksInfoReader.ReadBytes(16);
+                    m_UncompressedDataHash = blocksInfoReader.ReadBytes(16);
                 }
                 var blocksInfoCount = blocksInfoReader.ReadInt32();
                 m_BlocksInfo = new List<StorageBlock>();
@@ -520,6 +530,21 @@ namespace AssetStudio
                     Logger.Verbose($"Directory {i} Info: {m_DirectoryInfo[i]}");
                 }
             }
+
+            if (m_BlocksInfo.Count > 0)
+            {
+                IsFairGuardCandidate = FairGuardUtils.IsLikelyFairGuard(
+                    (uint)m_Header.flags,
+                    m_UncompressedDataHash,
+                    m_DirectoryInfo.Select(x => x.path).ToArray(),
+                    (ushort)m_BlocksInfo[0].flags,
+                    m_BlocksInfo[0].uncompressedSize);
+                if (IsFairGuardCandidate)
+                {
+                    Logger.Info("Bundle matches several FairGuard indicators; attempting safe first-block recovery if standard decompression fails.");
+                }
+            }
+
             if (HasBlockInfoNeedPaddingAtStart && (m_Header.flags & ArchiveFlags.BlockInfoNeedPaddingAtStart) != 0)
             {
                 reader.AlignStream(16);
@@ -572,6 +597,9 @@ namespace AssetStudio
                                 var uncompressedBytesSpan = uncompressedBytes.AsSpan(0, uncompressedSize);
 
                                 reader.Read(compressedBytesSpan);
+                                var fairGuardOriginalBytes = i == 0 && IsFairGuardCandidate && !Game.Type.IsArknightsEndfield()
+                                    ? compressedBytesSpan.ToArray()
+                                    : null;
                                 if (compressionType == CompressionType.Lz4Mr0k && Mr0kUtils.IsMr0k(compressedBytes))
                                 {
                                     Logger.Verbose($"Block encrypted with mr0k, decrypting...");
@@ -594,9 +622,45 @@ namespace AssetStudio
                                 {
                                     OPFPUtils.Decrypt(compressedBytesSpan, reader.FullPath);
                                 }
-                                var numWrite = LZ4.Instance.Decompress(compressedBytesSpan, uncompressedBytesSpan);
+                                int numWrite;
+                                try
+                                {
+                                    numWrite = LZ4.Instance.Decompress(compressedBytesSpan, uncompressedBytesSpan);
+                                }
+                                catch (Exception) when (fairGuardOriginalBytes != null)
+                                {
+                                    numWrite = -1;
+                                }
+
+                                if (numWrite != uncompressedSize && fairGuardOriginalBytes != null)
+                                {
+                                    try
+                                    {
+                                        fairGuardOriginalBytes.AsSpan().CopyTo(compressedBytesSpan);
+                                        FairGuardUtils.Decrypt(compressedBytesSpan);
+                                        numWrite = LZ4.Instance.Decompress(compressedBytesSpan, uncompressedBytesSpan);
+                                        if (numWrite == uncompressedSize)
+                                        {
+                                            FairGuardRecovered = true;
+                                            Logger.Info("FairGuard first block recovered and decompressed successfully.");
+                                        }
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        Logger.Warning($"FairGuard first-block recovery attempt failed: {ex.Message}");
+                                        numWrite = -1;
+                                    }
+                                }
+
                                 if (numWrite != uncompressedSize)
                                 {
+                                    if (IsFairGuardCandidate && i == 0)
+                                    {
+                                        FairGuardFirstBlockSkipped = true;
+                                        Logger.Warning($"FairGuard-like bundle detected, but first-block recovery failed. Keeping a {uncompressedSize}-byte placeholder so later blocks and manifest strings can still be inspected.");
+                                        blocksStream.Write(new byte[(int)uncompressedSize]);
+                                        break;
+                                    }
                                     throw new IOException($"Lz4 decompression error, write {numWrite} bytes but expected {uncompressedSize} bytes");
                                 }
                                 blocksStream.Write(uncompressedBytesSpan);
@@ -704,6 +768,65 @@ namespace AssetStudio
                 }
             }
             blocksStream.Position = 0;
+        }
+
+        private void TryParseFairGuardManifest(Stream blocksStream)
+        {
+            if (!IsFairGuardCandidate || !blocksStream.CanSeek)
+            {
+                return;
+            }
+
+            const long maxManifestPayloadBytes = 64L * 1024 * 1024;
+            var originalPosition = blocksStream.Position;
+            try
+            {
+                var payloadStart = FairGuardFirstBlockSkipped && m_BlocksInfo.Count > 0
+                    ? (long)m_BlocksInfo[0].uncompressedSize
+                    : 0L;
+                var payloadLength = blocksStream.Length - payloadStart;
+                if (payloadLength <= 16 || payloadLength > maxManifestPayloadBytes)
+                {
+                    Logger.Verbose($"Skipping FairGuard manifest string scan: candidate payload size {payloadLength} is outside the supported scan range.");
+                    return;
+                }
+
+                blocksStream.Position = payloadStart;
+                var payload = new byte[(int)payloadLength];
+                var totalRead = 0;
+                while (totalRead < payload.Length)
+                {
+                    var read = blocksStream.Read(payload, totalRead, payload.Length - totalRead);
+                    if (read == 0)
+                    {
+                        throw new EndOfStreamException("Unexpected end of bundle payload while scanning FairGuard manifest.");
+                    }
+                    totalRead += read;
+                }
+
+                var result = FairGuardManifestParser.ParseStringTable(payload);
+                if (!result.LooksLikeManifest)
+                {
+                    Logger.Verbose($"FairGuard candidate did not contain a recognizable s2_manifest string table (strings={result.Strings.Count}, s2Paths={result.S2PathCount}).");
+                    return;
+                }
+
+                FairGuardManifestStrings = result.Strings;
+                FairGuardManifestTrailingBinarySize = result.TrailingBinarySize;
+                Logger.Info($"FairGuard manifest string table parsed: {result.Strings.Count} strings, {result.S2PathCount} s2/ paths, {result.TrailingBinarySize} trailing binary bytes. Binary index section decoded: no. First block skipped: {FairGuardFirstBlockSkipped}.");
+                foreach (var sample in result.Strings.Where(x => x.StartsWith("s2/", StringComparison.OrdinalIgnoreCase)).Take(5))
+                {
+                    Logger.Verbose($"FairGuard manifest path: {sample}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning($"FairGuard manifest string scan failed: {ex.Message}");
+            }
+            finally
+            {
+                blocksStream.Position = originalPosition;
+            }
         }
 
         public int[] ParseVersion()
