@@ -29,6 +29,7 @@ namespace AssetStudio
         public int S2PathCount { get; set; }
         public int TrailingBinarySize { get; set; }
         public bool BinaryIndexDecoded { get; set; }
+        public bool FirstBlockSkipped { get; set; }
         public IReadOnlyList<string> Strings { get; set; }
         public IReadOnlyList<string> S2Paths { get; set; }
     }
