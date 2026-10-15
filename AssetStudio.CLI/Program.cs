@@ -13,6 +13,24 @@ namespace AssetStudio.CLI
     {
         public static void Main(string[] args) => CommandLine.Init(args);
 
+        private static void ExportFairGuardManifestReports(List<FairGuardManifestExport> reports, string outputDirectory)
+        {
+            if (reports == null || reports.Count == 0)
+            {
+                return;
+            }
+
+            Directory.CreateDirectory(outputDirectory);
+            foreach (var report in reports)
+            {
+                var sourceName = Path.GetFileName(report.SourcePath);
+                var outputPath = Path.Combine(outputDirectory, sourceName + ".fairguard-manifest.json");
+                File.WriteAllText(outputPath, JsonConvert.SerializeObject(report, Formatting.Indented));
+                Logger.Info($"Exported FairGuard manifest string table to {outputPath}. Binary index decoded: {report.BinaryIndexDecoded}.");
+            }
+            reports.Clear();
+        }
+
         public static void Run(Options o)
         {
             try
@@ -182,6 +200,7 @@ namespace AssetStudio.CLI
                     foreach (var file in fileList)
                     {
                         assetsManager.LoadFiles(file);
+                        ExportFairGuardManifestReports(assetsManager.FairGuardManifestReports, o.Output.FullName);
                         if (assetsManager.assetsFileList.Count > 0)
                         {
                             BuildAssetData(classTypeFilter, o.NameFilter, o.ContainerFilter, ref i);
