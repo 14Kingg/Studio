@@ -115,6 +115,10 @@ namespace AssetStudio
         
         private bool HasUncompressedDataHash = true;
         private bool HasBlockInfoNeedPaddingAtStart = true;
+        private byte[] m_UncompressedDataHash;
+
+        public bool IsFairGuardCandidate { get; private set; }
+        public bool FairGuardRecovered { get; private set; }
 
         public BundleFile(FileReader reader, Game game)
         {
@@ -487,7 +491,7 @@ namespace AssetStudio
             {
                 if (HasUncompressedDataHash)
                 {
-                    var uncompressedDataHash = blocksInfoReader.ReadBytes(16);
+                    m_UncompressedDataHash = blocksInfoReader.ReadBytes(16);
                 }
                 var blocksInfoCount = blocksInfoReader.ReadInt32();
                 m_BlocksInfo = new List<StorageBlock>();
@@ -520,6 +524,21 @@ namespace AssetStudio
                     Logger.Verbose($"Directory {i} Info: {m_DirectoryInfo[i]}");
                 }
             }
+
+            if (m_BlocksInfo.Count > 0)
+            {
+                IsFairGuardCandidate = FairGuardUtils.IsLikelyFairGuard(
+                    (uint)m_Header.flags,
+                    m_UncompressedDataHash,
+                    m_DirectoryInfo.Select(x => x.path).ToArray(),
+                    (ushort)m_BlocksInfo[0].flags,
+                    m_BlocksInfo[0].uncompressedSize);
+                if (IsFairGuardCandidate)
+                {
+                    Logger.Info("Bundle matches several FairGuard indicators; attempting safe first-block recovery if standard decompression fails.");
+                }
+            }
+
             if (HasBlockInfoNeedPaddingAtStart && (m_Header.flags & ArchiveFlags.BlockInfoNeedPaddingAtStart) != 0)
             {
                 reader.AlignStream(16);
@@ -572,6 +591,9 @@ namespace AssetStudio
                                 var uncompressedBytesSpan = uncompressedBytes.AsSpan(0, uncompressedSize);
 
                                 reader.Read(compressedBytesSpan);
+                                var fairGuardOriginalBytes = i == 0 && IsFairGuardCandidate && !Game.Type.IsArknightsEndfield()
+                                    ? compressedBytesSpan.ToArray()
+                                    : null;
                                 if (compressionType == CompressionType.Lz4Mr0k && Mr0kUtils.IsMr0k(compressedBytes))
                                 {
                                     Logger.Verbose($"Block encrypted with mr0k, decrypting...");
@@ -594,9 +616,34 @@ namespace AssetStudio
                                 {
                                     OPFPUtils.Decrypt(compressedBytesSpan, reader.FullPath);
                                 }
-                                var numWrite = LZ4.Instance.Decompress(compressedBytesSpan, uncompressedBytesSpan);
+                                int numWrite;
+                                try
+                                {
+                                    numWrite = LZ4.Instance.Decompress(compressedBytesSpan, uncompressedBytesSpan);
+                                }
+                                catch (Exception) when (fairGuardOriginalBytes != null)
+                                {
+                                    numWrite = -1;
+                                }
+
+                                if (numWrite != uncompressedSize && fairGuardOriginalBytes != null)
+                                {
+                                    fairGuardOriginalBytes.AsSpan().CopyTo(compressedBytesSpan);
+                                    FairGuardUtils.Decrypt(compressedBytesSpan);
+                                    numWrite = LZ4.Instance.Decompress(compressedBytesSpan, uncompressedBytesSpan);
+                                    if (numWrite == uncompressedSize)
+                                    {
+                                        FairGuardRecovered = true;
+                                        Logger.Info("FairGuard first block recovered and decompressed successfully.");
+                                    }
+                                }
+
                                 if (numWrite != uncompressedSize)
                                 {
+                                    if (IsFairGuardCandidate && i == 0)
+                                    {
+                                        throw new IOException($"FairGuard-like bundle detected, but first-block recovery failed: wrote {numWrite} bytes, expected {uncompressedSize} bytes.");
+                                    }
                                     throw new IOException($"Lz4 decompression error, write {numWrite} bytes but expected {uncompressedSize} bytes");
                                 }
                                 blocksStream.Write(uncompressedBytesSpan);
