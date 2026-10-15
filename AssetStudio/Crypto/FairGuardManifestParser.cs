@@ -77,9 +77,13 @@ namespace AssetStudio
 
                 strings.Add(Encoding.ASCII.GetString(body, valueOffset, length));
                 var next = valueOffset + length;
-                offset = (next + 3) & ~3;
-                if (offset > body.Length)
+                var alignedOffset = (next + 3) & ~3;
+                if (alignedOffset > body.Length)
+                {
+                    offset = next;
                     break;
+                }
+                offset = alignedOffset;
             }
 
             return new FairGuardManifestParseResult(strings, offset, body.Length);
