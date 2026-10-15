@@ -120,10 +120,13 @@ namespace AssetStudio
         public bool IsFairGuardCandidate { get; private set; }
         public bool FairGuardRecovered { get; private set; }
         public IReadOnlyList<string> FairGuardManifestStrings { get; private set; } = Array.Empty<string>();
+        public int FairGuardManifestTrailingBinarySize { get; private set; }
+        public string SourcePath { get; private set; }
 
         public BundleFile(FileReader reader, Game game)
         {
             Game = game;
+            SourcePath = reader.FullPath;
             m_Header = ReadBundleHeader(reader);
             switch (m_Header.signature)
             {
@@ -793,6 +796,7 @@ namespace AssetStudio
                 }
 
                 FairGuardManifestStrings = result.Strings;
+                FairGuardManifestTrailingBinarySize = result.TrailingBinarySize;
                 Logger.Info($"FairGuard manifest string table parsed: {result.Strings.Count} strings, {result.S2PathCount} s2/ paths, {result.TrailingBinarySize} trailing binary bytes. The binary index section has not been decoded.");
                 foreach (var sample in result.Strings.Where(x => x.StartsWith("s2/", StringComparison.OrdinalIgnoreCase)).Take(5))
                 {
