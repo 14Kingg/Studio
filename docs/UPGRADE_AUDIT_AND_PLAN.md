@@ -34,7 +34,7 @@
 10. GUI 主窗体和 Designer 文件较大，UI 改造应先抽离任务/导出服务，避免把解析逻辑继续堆进窗体事件。
 
 ### P1 — FairGuard UnityFS 专项
-11. 已找到用户上传的 fairguard_unityfs.py。其当前说明限定于 Unity 2022.3.x、flags 约为 0x243 的特定样本；不能据此推断所有 FairGuard 版本都相同。
+11. 已找到用户上传的 fairguard_unityfs.py。其当前说明限定于 Unity 2022.3.x、flags 约为 0x243 的特定样本；不能据此推断所有 FairGuard 版本都相同。后续静态检查还发现仓库已有 AssetStudio/Crypto/FairGuardUtils.cs，且 BundleFile.ReadBlocks 在 Arknights Endfield 专用路径调用它；下一步应验证并扩展这条现有路径，而不是重复实现算法。
 12. 脚本会尝试解压各数据块，并在失败时用零字节占位。它并未还原首块加密内容，因此输出 payload 可能只是部分可读；零占位可能让依赖首块的节点数据损坏。
 13. 代码读取了 combined、info_at_end 标志，但解析路径没有完整实现所有对应布局；需用标准 UnityFS 测试样本覆盖这些分支。
 14. 解压异常被统一记录为加密/不可解压块，错误诊断过于宽泛。新实现应区分：格式识别、块边界错误、压缩格式不支持、校验失败、疑似首块加密、部分可恢复、完整提取。
