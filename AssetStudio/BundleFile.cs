@@ -119,6 +119,7 @@ namespace AssetStudio
 
         public bool IsFairGuardCandidate { get; private set; }
         public bool FairGuardRecovered { get; private set; }
+        public IReadOnlyList<string> FairGuardManifestStrings { get; private set; } = Array.Empty<string>();
 
         public BundleFile(FileReader reader, Game game)
         {
@@ -152,6 +153,7 @@ namespace AssetStudio
                     using (var blocksStream = CreateBlocksStream(reader.FullPath))
                     {
                         ReadBlocks(reader, blocksStream);
+                        TryParseFairGuardManifest(blocksStream);
                         ReadFiles(blocksStream, reader.FullPath);
                     }
                     break;
@@ -751,6 +753,60 @@ namespace AssetStudio
                 }
             }
             blocksStream.Position = 0;
+        }
+
+        private void TryParseFairGuardManifest(Stream blocksStream)
+        {
+            if (!IsFairGuardCandidate || !blocksStream.CanSeek)
+            {
+                return;
+            }
+
+            const long maxManifestPayloadBytes = 64L * 1024 * 1024;
+            var originalPosition = blocksStream.Position;
+            try
+            {
+                if (blocksStream.Length <= 16 || blocksStream.Length > maxManifestPayloadBytes)
+                {
+                    Logger.Verbose($"Skipping FairGuard manifest string scan: payload size {blocksStream.Length} is outside the supported scan range.");
+                    return;
+                }
+
+                blocksStream.Position = 0;
+                var payload = new byte[(int)blocksStream.Length];
+                var totalRead = 0;
+                while (totalRead < payload.Length)
+                {
+                    var read = blocksStream.Read(payload, totalRead, payload.Length - totalRead);
+                    if (read == 0)
+                    {
+                        throw new EndOfStreamException("Unexpected end of bundle payload while scanning FairGuard manifest.");
+                    }
+                    totalRead += read;
+                }
+
+                var result = FairGuardManifestParser.ParseStringTable(payload);
+                if (!result.LooksLikeManifest)
+                {
+                    Logger.Verbose($"FairGuard candidate did not contain a recognizable s2_manifest string table (strings={result.Strings.Count}, s2Paths={result.S2PathCount}).");
+                    return;
+                }
+
+                FairGuardManifestStrings = result.Strings;
+                Logger.Info($"FairGuard manifest string table parsed: {result.Strings.Count} strings, {result.S2PathCount} s2/ paths, {result.TrailingBinarySize} trailing binary bytes. The binary index section has not been decoded.");
+                foreach (var sample in result.Strings.Where(x => x.StartsWith("s2/", StringComparison.OrdinalIgnoreCase)).Take(5))
+                {
+                    Logger.Verbose($"FairGuard manifest path: {sample}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning($"FairGuard manifest string scan failed: {ex.Message}");
+            }
+            finally
+            {
+                blocksStream.Position = originalPosition;
+            }
         }
 
         public int[] ParseVersion()
