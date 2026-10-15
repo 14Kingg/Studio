@@ -6,6 +6,40 @@ namespace AssetStudio
     //Special thanks to LukeFZ#4035.
     public static class FairGuardUtils
     {
+        /// <summary>
+        /// Identifies a likely FairGuard UnityFS bundle using several independent
+        /// indicators. This is detection only; it does not prove successful decryption.
+        /// </summary>
+        public static bool IsLikelyFairGuard(uint archiveFlags, byte[] uncompressedDataHash,
+            IReadOnlyList<string> nodePaths, ushort firstBlockFlags, uint firstBlockUncompressedSize)
+        {
+            if ((archiveFlags & 0x200) == 0 || uncompressedDataHash == null || uncompressedDataHash.Length != 16 ||
+                firstBlockUncompressedSize == 0 || nodePaths == null || nodePaths.Count == 0)
+            {
+                return false;
+            }
+
+            for (var i = 0; i < uncompressedDataHash.Length; i++)
+            {
+                if (uncompressedDataHash[i] != 0)
+                    return false;
+            }
+
+            var compressionType = firstBlockFlags & 0x3F;
+            if (compressionType != 2 && compressionType != 3)
+                return false;
+
+            foreach (var path in nodePaths)
+            {
+                if (string.IsNullOrWhiteSpace(path) || !path.StartsWith("CAB-", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                if (Guid.TryParse(path.Substring(4), out _))
+                    return true;
+            }
+
+            return false;
+        }
         public static void Decrypt(Span<byte> bytes)
         {
             Logger.Verbose($"Attempting to decrypt block with FairGuard encryption...");
