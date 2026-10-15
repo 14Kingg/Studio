@@ -22,6 +22,17 @@ namespace AssetStudio
         }
     }
 
+    public sealed class FairGuardManifestExport
+    {
+        public string SourcePath { get; set; }
+        public int ParsedStringCount { get; set; }
+        public int S2PathCount { get; set; }
+        public int TrailingBinarySize { get; set; }
+        public bool BinaryIndexDecoded { get; set; }
+        public IReadOnlyList<string> Strings { get; set; }
+        public IReadOnlyList<string> S2Paths { get; set; }
+    }
+
     /// <summary>
     /// Best-effort parser for the length-prefixed ASCII string table observed in
     /// FairGuard s2_manifest payloads. This does not claim to decode the trailing
